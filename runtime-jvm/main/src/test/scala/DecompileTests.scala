@@ -25,6 +25,18 @@ object DecompileTests extends App {
           }
       note(PrettyPrint.prettyTerm(compilation.normalize(_ => ???)(pingpong)).render(40), includeAlways = true)
       ok
+    },
+    test("ex3") { implicit T =>
+      val pingpong =
+        Term.LetRec(
+          "foo" -> Term.Lam("x")(Term.Var("pang")(Term.Var("x"))),
+          "pang" -> Term.Lam("x")(Term.Var("ping")(Term.Var("x"))),
+          "ping" -> Term.Lam("x")(Term.Var("pong")(Term.Var("x"))),
+          "pong" -> Term.Lam("x")(Term.Var("ping")(Term.Var("pang")(Term.Var("x"))))) {
+            Term.Var("ping")
+          }
+      note(PrettyPrint.prettyTerm(compilation.normalize(_ => ???)(pingpong)).render(40), includeAlways = true)
+      ok
     }
   )
 
