@@ -2,7 +2,7 @@ package org.unisonweb
 
 import org.unisonweb.util.{Lazy, Traverse}
 import ABT.{Abs, AnnotatedTerm, Tm}
-import compilation.Value
+import compilation.{Ref, Value}
 
 object Term {
 
@@ -53,6 +53,57 @@ object Term {
       val freshName = freshen(Name("_cond"), cond)
       Let(freshName -> cond)(ANF(If0(Var(freshName), if0, ifNot0)))
     case ABT.Tm(other) => ABT.Tm(F.instance.map(other)(ANF))
+  }
+
+  private case class DecompileCycle(refs: Vector[Ref], i: Int) extends Throwable {
+    override def fillInStackTrace = this
+  }
+
+  /** Removes any `Delayed` and `Compiled` nodes by expanding them to their source representations.
+   *  `refs` is the set of refs that we've descended through; used for detecting cycles,
+   *    which need to be transformed into a `let rec` */
+  def fullyDecompile(t: Term, refs: Vector[Ref]): Term = t match {
+    case Builtin(_) | Num(_) | Var(_) => t
+    case Apply(f, args) =>
+      val f2 = fullyDecompile(f, refs)
+      Apply(f2, args.mapConserve(fullyDecompile(_, refs)): _*)
+    case If0(cond, ifZero, ifNonzero) => If0(fullyDecompile(cond, refs), fullyDecompile(ifZero, refs), fullyDecompile(ifNonzero, refs))
+    case Let1(name, binding, body) => Let1(name, fullyDecompile(binding, refs))(fullyDecompile(body, refs))
+    case LetRec(bindings, body) =>
+      LetRec(bindings.map { case (name, term) => (name, fullyDecompile(term, refs)) }: _*)(fullyDecompile(body, refs))
+    case Delayed(_, lazyVal) =>
+      // println("lazyVal.value: " + lazyVal.value)
+      fullyDecompile(Compiled(lazyVal.value), refs)
+    case Compiled(r@Ref(_,_)) => refs.indexOf(r) match {
+      case -1 =>
+        try fullyDecompile(r.value.decompile, refs :+ r)
+        catch {
+          case e @ DecompileCycle(refs, i) =>
+            if (r ne refs(i))
+              throw e
+            else {
+              val cycle = refs.drop(i)
+              LetRec(cycle.map { r =>
+                val name = r.name
+                val binding = r.value.decompile
+                require (Term.freeVars(binding).isEmpty)
+                val binding2 = binding.rewriteDown {
+                  case Compiled(r2@Ref(_,_)) => cycle.indexOf(r2) match {
+                    case -1 => fullyDecompile(Compiled(r2), refs)
+                    case i => ABT.Var(cycle(i).name)
+                  }
+                  case term => fullyDecompile(term, refs)
+                }
+                (name, binding2)
+              }: _*)(ABT.Var(cycle(i).name))
+            }
+        }
+      case i => throw DecompileCycle(refs, i)
+    }
+    case Compiled(value) => fullyDecompile(value.decompile, refs)
+    // todo - this is start of SOE - body contains a function application, which contains a lambda
+    // i have a theory that our logic for detecting cycles isn't covering all cases
+    case Lam(names, body) => Lam(names: _*)(fullyDecompile(body, refs))
   }
 
   // todo - test when function being applied is a compound expression
