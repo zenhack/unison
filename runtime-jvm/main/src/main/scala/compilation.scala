@@ -1390,6 +1390,44 @@ package object compilation {
     try c(r, rec, top, stackU, x1, x0, stackB, x1b, x0b)
     catch { case TailCall => loop(r, top, stackU, stackB) }
 
+  import java.util.concurrent.{ScheduledExecutorService, TimeUnit}
+
+  def evalIO(
+    pool: ScheduledExecutorService)(
+    c: Computation, r: R, stackU: Array[U], stackB: Array[B],
+    onComplete: Value => Unit): Unit = {
+
+    def go(c: Computation)(onComplete: Value => Unit): Unit =
+      try {
+        val u = evalClosed(c, r, StackPtr.empty, stackU, stackB)
+        onComplete(Value(u, r.boxed))
+      }
+      catch {
+        case Requested(Id.Builtin(Name("IO")), cid, args, k) =>
+          cid.toInt match {
+            // sleep : Duration -> {IO} ()
+            case 0 =>
+              val durationInNanos = args(0).toUnboxed
+              val run: Runnable =
+                () => go(k compileApply1 BuiltinTypes.Unit.value)(onComplete)
+              val x = pool.schedule(run, durationInNanos, TimeUnit.NANOSECONDS)
+            // fork : (() => {IO} a) -> {IO} Unit
+            case 1 =>
+              val computation = args(0).toBoxed.asInstanceOf[Lambda]
+              val kUnit = k compileApply1 BuiltinTypes.Unit.value
+              // start running computation (on the thread pool)
+              // then invoke
+              val run: Runnable =
+                () => evalIO(pool)(
+                        computation compileApply1 BuiltinTypes.Unit.value,
+                        Result(), new Array[U](1024), new Array[B](1024),
+                        _ => ())
+              pool.submit(run)
+              go(kUnit)(onComplete)
+          }
+      }
+  }
+
   @inline def evalClosed(c: Computation, r: R, top: StackPtr,
                          stackU: Array[U], stackB: Array[B]): U =
     try c(r, null, top, stackU, U0, U0, stackB, null, null)

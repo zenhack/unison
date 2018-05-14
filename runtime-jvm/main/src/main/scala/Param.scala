@@ -79,6 +79,12 @@ object Value {
                     stackB: Array[B], x1b: B, x0b: B): U =
       body(r, this, top, stackU, x1, x0, stackB, x1b, x0b)
 
+    final def compileApply1(v: Value): Computation = {
+      assert(arity == 1)
+      (r,rec,top,stackU,x1,x0,stackB,x1b,x0b) =>
+        self.apply(r, top, stackU, x1, v.toUnboxed, stackB, x1b, v.toBoxed)
+    }
+
     def compose(f: Lambda): Lambda = {
       assert(arity == 1)
       val k: Computation = (r, rec, top, stackU, x1, x0, stackB, x1b, x0b) => {
