@@ -1392,6 +1392,9 @@ package object compilation {
 
   import java.util.concurrent.{ScheduledExecutorService, TimeUnit}
 
+  // note: we might consider pooling stacks if we are pooling java threads;
+  // currently a new stack is allocated for each forked unison thread
+  // If the stacks can grow, the allocation costs are amortized / less bad.
   def evalIO(
     pool: ScheduledExecutorService)(
     c: Computation, r: R, stackU: Array[U], stackB: Array[B],
@@ -1415,8 +1418,8 @@ package object compilation {
             case 1 =>
               val computation = args(0).toBoxed.asInstanceOf[Lambda]
               val kUnit = k compileApply1 BuiltinTypes.Unit.value
-              // start running computation (on the thread pool)
-              // then invoke
+              // start running computation (on the thread pool),
+              // then evaluate `k(Unit)`
               val run: Runnable =
                 () => evalIO(pool)(
                         computation compileApply1 BuiltinTypes.Unit.value,
@@ -1424,8 +1427,12 @@ package object compilation {
                         _ => ())
               pool.submit(run)
               go(kUnit)(onComplete)
+            // For file i/o, might have another piece of state Map[Filename, OpenFile/Handle/Whatever]
+            // For MVars, might have a Map[MVarId, whateverimpl]
           }
       }
+
+    go(c, onComplete)
   }
 
   @inline def evalClosed(c: Computation, r: R, top: StackPtr,
