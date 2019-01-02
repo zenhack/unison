@@ -6,7 +6,7 @@
 {-# LANGUAGE ScopedTypeVariables   #-}
 
 module Unison.Util.Pretty (
-   Pretty,
+   Pretty, Pretty0,
    bulleted,
    -- breakable
    column2,
@@ -15,6 +15,7 @@ module Unison.Util.Pretty (
    dashed,
    external,
    flatMap,
+   fromPretty0,
    group,
    hang',
    hang,

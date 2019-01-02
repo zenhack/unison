@@ -2,20 +2,39 @@
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 module Unison.TypePrinter where
 
+import Data.String (fromString, IsString)
 import qualified Data.Text                     as Text
 import           Data.Maybe                     ( isJust )
 import           Unison.Names                   ( Name )
-import           Unison.Reference               ( pattern Builtin )
+import           Unison.Reference               ( pattern Builtin, Reference )
 import           Unison.Type
 import           Unison.Var                     ( Var )
 import qualified Unison.Var                    as Var
 import qualified Unison.Util.Pretty            as PP
 import Unison.Util.Pretty (Pretty)
+import qualified Unison.Referent as Referent
 import           Unison.PrettyPrintEnv          ( PrettyPrintEnv )
 import qualified Unison.PrettyPrintEnv         as PrettyPrintEnv
+import qualified Data.ListLike                 as LL
+
+-- todo: move this elsewhere
+data Referent
+  = Term Referent.Referent | Type Reference | Pattern Reference Int
+
+toPretty :: (LL.ListLike s Char, IsString s)
+         => PrettyPrintEnv -> PP.Pretty0 Referent s -> Pretty s
+toPretty ppe p = PP.fromPretty0 (text . env) p where
+  env (Term r) = PrettyPrintEnv.termName ppe r
+  env (Type r) = PrettyPrintEnv.typeName ppe r
+  env (Pattern r cid) = PrettyPrintEnv.patternName ppe r cid
+  text t = fromString $ Text.unpack t
+
+pretty :: Var v => PrettyPrintEnv -> Int -> AnnotatedType v a -> Pretty String
+pretty ppe p tp = toPretty ppe (pretty0 p tp)
 
 {- Explanation of precedence handling
 
@@ -39,41 +58,41 @@ import qualified Unison.PrettyPrintEnv         as PrettyPrintEnv
 
 -}
 
-pretty :: Var v => PrettyPrintEnv -> Int -> AnnotatedType v a -> Pretty String
+pretty0 :: Var v => Int -> AnnotatedType v a -> PP.Pretty0 Referent String
 -- p is the operator precedence of the enclosing context (a number from 0 to
 -- 11, or -1 to avoid outer parentheses unconditionally).  Function
 -- application has precedence 10.
-pretty n p tp = case tp of
+pretty0 p tp = case tp of
   Var' v     -> l $ Text.unpack (Var.name v)
-  Ref' r     -> l $ Text.unpack (PrettyPrintEnv.typeName n r)
+  Ref' r     -> PP.external (Type r)
   Cycle' _ _ -> l $ "error" -- TypeParser does not currently emit Cycle
   Abs' _     -> l $ "error" -- TypeParser does not currently emit Abs
   Ann' _ _   -> l $ "error" -- TypeParser does not currently emit Ann
   App' (Ref' (Builtin "Sequence")) x ->
-    PP.group $ l "[" <> pretty n 0 x <> l "]"
+    PP.group $ l "[" <> pretty0 0 x <> l "]"
   Tuple' [x] -> PP.parenthesizeIf (p >= 10) $ "Pair" `PP.hang` PP.spaced
-    [pretty n 10 x, "()"]
-  Tuple' xs  -> PP.parenthesizeCommas $ map (pretty n 0) xs
-  Apps' f xs -> PP.parenthesizeIf (p >= 10) $ pretty n 9 f `PP.hang` PP.spaced
-    (pretty n 10 <$> xs)
+    [pretty0 10 x, "()"]
+  Tuple' xs  -> PP.parenthesizeCommas $ map (pretty0 0) xs
+  Apps' f xs -> PP.parenthesizeIf (p >= 10) $ pretty0 9 f `PP.hang` PP.spaced
+    (pretty0 10 <$> xs)
   Effect1' e t ->
-    PP.parenthesizeIf (p >= 10) $ pretty n 9 e <> l " " <> pretty n 10 t
+    PP.parenthesizeIf (p >= 10) $ pretty0 9 e <> l " " <> pretty0 10 t
   Effects' es         -> effects (Just es)
   ForallNamed' v body -> if (p < 0)
-    then pretty n p body
+    then pretty0 p body
     else
       paren True
       $         ("∀ " <> l (Text.unpack (Var.name v)) <> ".")
-      `PP.hang` pretty n (-1) body
+      `PP.hang` pretty0 (-1) body
   t@(Arrow' _ _) -> case (ungeneralizeEffects t) of
     EffectfulArrows' (Ref' UnitRef) rest -> arrows True True rest
     EffectfulArrows' fst rest ->
-      PP.parenthesizeIf (p >= 0) $ pretty n 0 fst <> arrows False False rest
+      PP.parenthesizeIf (p >= 0) $ pretty0 0 fst <> arrows False False rest
     _ -> l "error"
   _ -> l "error"
  where
   effects Nothing   = mempty
-  effects (Just es) = PP.group $ "{" <> PP.commas (pretty n 0 <$> es) <> "}"
+  effects (Just es) = PP.group $ "{" <> PP.commas (pretty0 0 <$> es) <> "}"
   arrow delay first mes =
     (if first then mempty else PP.softbreak <> l "->")
       <> (if delay then (if first then l "'" else l " '") else mempty)
@@ -86,7 +105,7 @@ pretty n p tp = case tp of
   arrows delay first ((mes, arg) : rest) =
     arrow delay first mes
       <> (  parenNoGroup (delay && (not $ null rest))
-         $  pretty n 0 arg
+         $  pretty0 0 arg
          <> arrows False False rest
          )
   arrows False False [] = mempty
@@ -114,7 +133,14 @@ prettySignatures
   => PrettyPrintEnv
   -> [(Name, AnnotatedType v a)]
   -> Pretty String
-prettySignatures env ts = PP.column2
-  [ (PP.text name, ":" <> PP.hang "" (pretty env (-1) typ))
+prettySignatures ppe cols =
+  toPretty ppe $ prettySignatures0 cols
+
+prettySignatures0
+  :: Var v
+  => [(Name, AnnotatedType v a)]
+  -> PP.Pretty0 Referent String
+prettySignatures0 ts = PP.column2
+  [ (PP.text name, ":" <> PP.hang "" (pretty0 (-1) typ))
   | (name, typ) <- ts
   ]
