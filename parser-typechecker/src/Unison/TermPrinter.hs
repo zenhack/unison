@@ -27,9 +27,11 @@ import           Unison.Var                     ( Var )
 import qualified Unison.Var                    as Var
 import           Unison.Util.Monoid             ( intercalateMap )
 import qualified Unison.Util.Pretty             as PP
-import           Unison.Util.Pretty             ( Pretty )
+import           Unison.Util.Pretty             ( Pretty, Pretty0 )
 import           Unison.PrettyPrintEnv          ( PrettyPrintEnv )
 import qualified Unison.PrettyPrintEnv         as PrettyPrintEnv
+
+type Referent = TypePrinter.Referent
 
 --TODO use imports to trim fully qualified names
 
@@ -58,6 +60,14 @@ data InfixContext
   = Infix
   | NonInfix
   deriving (Eq)
+
+pretty
+  :: Var v
+  => PrettyPrintEnv
+  -> AmbientContext
+  -> AnnotatedTerm v a
+  -> Pretty String
+pretty ppe ac at = TypePrinter.toPretty ppe (pretty0 ac at)
 
 {- Explanation of precedence handling
 
@@ -113,103 +123,102 @@ data InfixContext
 
 -}
 
-pretty
+pretty0
   :: Var v
-  => PrettyPrintEnv
-  -> AmbientContext
+  => AmbientContext
   -> AnnotatedTerm v a
-  -> Pretty String
-pretty n AmbientContext { precedence = p, blockContext = bc, infixContext = ic } term
+  -> Pretty0 Referent String
+pretty0 AmbientContext { precedence = p, blockContext = bc, infixContext = ic } term
   = specialCases term $ \case
     Var' v -> parenIfInfix (Var.nameStr v) ic . PP.text $ Var.name v
     Ref' r -> parenIfInfix name ic $ l $ name
       where name = Text.unpack (PrettyPrintEnv.termName n (Referent.Ref r))
-    Ann' tm t ->
-      paren (p >= 0)
-        $  pretty n (ac 10 Normal) tm
-        <> PP.hang " :" (TypePrinter.pretty n 0 t)
-    Int'     i  -> (if i >= 0 then l "+" else mempty) <> (l $ show i)
-    Nat'     u  -> l $ show u
-    Float'   f  -> l $ show f
-    -- TODO How to handle Infinity, -Infinity and NaN?  Parser cannot parse
-    --      them.  Haskell doesn't have literals for them either.  Is this
-    --      function only required to operate on terms produced by the parser?
-    --      In which case the code is fine as it stands.  If it can somehow run
-    --      on values produced by execution (or, one day, on terms produced by
-    --      metaprograms), then it needs to be able to print them (and then the
-    --       parser ought to be able to parse them, to maintain symmetry.)
-    Boolean' b  -> if b then l "true" else l "false"
-    Text'    s  -> l $ show s
-    Blank'   id -> l "_" <> (l $ fromMaybe "" (Blank.nameb id))
-    Constructor' ref i ->
-      l (Text.unpack (PrettyPrintEnv.constructorName n ref i))
-    Request' ref i -> l (Text.unpack (PrettyPrintEnv.requestName n ref i))
-    Handle' h body ->
-      paren (p >= 2)
-        $ ("handle" `PP.hang` pretty n (ac 2 Normal) h)
-        <> PP.softbreak
-        <> ("in" `PP.hang` pretty n (ac 2 Block) body)
-    App' x (Constructor' Type.UnitRef 0) ->
-      paren (p >= 11) $ l "!" <> pretty n (ac 11 Normal) x
-    AskInfo' x -> paren (p >= 11) $ pretty n (ac 11 Normal) x <> l "?"
-    LamNamed' v x | (Var.name v) == "()" ->
-      paren (p >= 11) $ l "'" <> pretty n (ac 11 Normal) x
-    Vector' xs -> PP.group $
-      "[" <> optSpace
-          <> intercalateMap ("," <> PP.softbreak <> optSpace)
-                            (pretty n (ac 0 Normal))
-                            xs
-        <> "]"
-      where optSpace = PP.orElse "" " "
-    If' cond t f -> paren (p >= 2) $
-      if height > 0 then PP.lines [
-        "if " <> pcond <> (" then") `PP.hang` pt,
-        "else" `PP.hang` pf
-       ]
-      else PP.spaced [
-        "if" `PP.hang` pcond <> (" then" `PP.hang` pt),
-        "else" `PP.hang` pf
-       ]
-     where
-       height = PP.preferredHeight pt `max` PP.preferredHeight pf
-       pcond  = pretty n (ac 2 Block) cond
-       pt     = pretty n (ac 2 Block) t
-       pf     = pretty n (ac 2 Block) f
-    And' x y ->
-      paren (p >= 10) $ PP.spaced [
-        "and", pretty n (ac 10 Normal) x,
-               pretty n (ac 10 Normal) y
-      ]
-    Or' x y ->
-      paren (p >= 10) $ PP.spaced [
-        "or", pretty n (ac 10 Normal) x,
-              pretty n (ac 10 Normal) y
-      ]
-    LetRecNamed' bs e -> printLet bc bs e
-    Lets' bs e -> printLet bc (map (\(_, v, binding) -> (v, binding)) bs) e
-    Match' scrutinee branches -> paren (p >= 2) $
-      ("case " <> pretty n (ac 2 Normal) scrutinee <> " of") `PP.hang` bs
-      where bs = PP.lines (map printCase branches)
+    -- Ann' tm t ->
+    --   paren (p >= 0)
+    --     $  pretty0 (ac 10 Normal) tm
+    --     <> PP.hang " :" (TypePrinter.pretty0 0 t)
+    -- Int'     i  -> (if i >= 0 then l "+" else mempty) <> (l $ show i)
+    -- Nat'     u  -> l $ show u
+    -- Float'   f  -> l $ show f
+    -- -- TODO How to handle Infinity, -Infinity and NaN?  Parser cannot parse
+    -- --      them.  Haskell doesn't have literals for them either.  Is this
+    -- --      function only required to operate on terms produced by the parser?
+    -- --      In which case the code is fine as it stands.  If it can somehow run
+    -- --      on values produced by execution (or, one day, on terms produced by
+    -- --      metaprograms), then it needs to be able to print them (and then the
+    -- --       parser ought to be able to parse them, to maintain symmetry.)
+    -- Boolean' b  -> if b then l "true" else l "false"
+    -- Text'    s  -> l $ show s
+    -- Blank'   id -> l "_" <> (l $ fromMaybe "" (Blank.nameb id))
+    -- Constructor' ref i ->
+    --   l (Text.unpack (PrettyPrintEnv.constructorName n ref i))
+    -- Request' ref i -> l (Text.unpack (PrettyPrintEnv.requestName n ref i))
+    -- Handle' h body ->
+    --   paren (p >= 2)
+    --     $ ("handle" `PP.hang` pretty0 (ac 2 Normal) h)
+    --     <> PP.softbreak
+    --     <> ("in" `PP.hang` pretty0 (ac 2 Block) body)
+    -- App' x (Constructor' Type.UnitRef 0) ->
+    --   paren (p >= 11) $ l "!" <> pretty0 (ac 11 Normal) x
+    -- AskInfo' x -> paren (p >= 11) $ pretty0 (ac 11 Normal) x <> l "?"
+    -- LamNamed' v x | (Var.name v) == "()" ->
+    --   paren (p >= 11) $ l "'" <> pretty0 (ac 11 Normal) x
+    -- Vector' xs -> PP.group $
+    --   "[" <> optSpace
+    --       <> intercalateMap ("," <> PP.softbreak <> optSpace)
+    --                         (pretty0 (ac 0 Normal))
+    --                         xs
+    --     <> "]"
+    --   where optSpace = PP.orElse "" " "
+    -- If' cond t f -> paren (p >= 2) $
+    --   if height > 0 then PP.lines [
+    --     "if " <> pcond <> (" then") `PP.hang` pt,
+    --     "else" `PP.hang` pf
+    --    ]
+    --   else PP.spaced [
+    --     "if" `PP.hang` pcond <> (" then" `PP.hang` pt),
+    --     "else" `PP.hang` pf
+    --    ]
+    --  where
+    --    height = PP.preferredHeight pt `max` PP.preferredHeight pf
+    --    pcond  = pretty0 (ac 2 Block) cond
+    --    pt     = pretty0 (ac 2 Block) t
+    --    pf     = pretty0 (ac 2 Block) f
+    -- And' x y ->
+    --   paren (p >= 10) $ PP.spaced [
+    --     "and", pretty0 (ac 10 Normal) x,
+    --            pretty0 (ac 10 Normal) y
+    --   ]
+    -- Or' x y ->
+    --   paren (p >= 10) $ PP.spaced [
+    --     "or", pretty0 (ac 10 Normal) x,
+    --           pretty0 (ac 10 Normal) y
+    --   ]
+    -- LetRecNamed' bs e -> printLet bc bs e
+    -- Lets' bs e -> printLet bc (map (\(_, v, binding) -> (v, binding)) bs) e
+    -- Match' scrutinee branches -> paren (p >= 2) $
+    --   ("case " <> pretty0 (ac 2 Normal) scrutinee <> " of") `PP.hang` bs
+    --   where bs = PP.lines (map printCase branches)
     t -> l "error: " <> l (show t)
  where
   specialCases term go = case (term, binaryOpsPred) of
     (Tuple' [x], _) ->
       paren (p >= 10) $ "Pair" `PP.hang`
-        PP.spaced [pretty n (ac 10 Normal) x, "()" ]
+        PP.spaced [pretty0 (ac 10 Normal) x, "()" ]
     (Tuple' xs, _) -> paren True $ commaList xs
     BinaryAppsPred' apps lastArg -> paren (p >= 3) $
-      binaryApps apps (pretty n (ac 3 Normal) lastArg)
+      binaryApps apps (pretty0 (ac 3 Normal) lastArg)
     _ -> case (term, nonForcePred) of
       AppsPred' f args | not $ isVarKindInfo f ->
-        paren (p >= 10) $ pretty n (ac 10 Normal) f `PP.hang`
-          PP.spacedMap (pretty n (ac 10 Normal)) args
+        paren (p >= 10) $ pretty0 (ac 10 Normal) f `PP.hang`
+          PP.spacedMap (pretty0 (ac 10 Normal)) args
       _ -> case (term, nonUnitArgPred) of
         LamsNamedPred' vs body ->
           paren (p >= 3) $
-            (varList vs <> " ->") `PP.hang` pretty n (ac 2 Block) body
+            (varList vs <> " ->") `PP.hang` pretty0 (ac 2 Block) body
         _ -> go term
 
-  sepList sep xs = sepList' (pretty n (ac 0 Normal)) sep xs
+  sepList sep xs = sepList' (pretty0 (ac 0 Normal)) sep xs
   sepList' f sep xs = fold $ intersperse sep (map f xs)
   varList vs = sepList' (PP.text . Var.name) PP.softbreak vs
   commaList = sepList ("," <> PP.softbreak)
@@ -218,10 +227,10 @@ pretty n AmbientContext { precedence = p, blockContext = bc, infixContext = ic }
     paren ((sc /= Block) && p >= 12)
       $  letIntro
       $  PP.lines (map printBinding bs ++
-                   [PP.group $ pretty n (ac 0 Normal) e])
+                   [PP.group $ pretty0 (ac 0 Normal) e])
    where
     printBinding (v, binding) = if isBlank $ Var.nameStr v
-      then pretty n (ac (-1) Normal) binding
+      then pretty0 (ac (-1) Normal) binding
       else prettyBinding n v binding
     letIntro = case sc of
       Block  -> id
@@ -230,12 +239,12 @@ pretty n AmbientContext { precedence = p, blockContext = bc, infixContext = ic }
     isBlank _ = False
 
   printCase (MatchCase pat guard (AbsN' vs body)) =
-    PP.group $ lhs `PP.hang` pretty n (ac 0 Block) body
+    PP.group $ lhs `PP.hang` pretty0 (ac 0 Block) body
     where
-    lhs = PP.group (fst (prettyPattern n (-1) vs pat) <> " ")
+    lhs = PP.group (fst (prettyPattern (-1) vs pat) <> " ")
        <> printGuard guard
        <> "->"
-    printGuard (Just g) = PP.group $ PP.spaced ["|", pretty n (ac 2 Normal) g, ""]
+    printGuard (Just g) = PP.group $ PP.spaced ["|", pretty0 (ac 2 Normal) g, ""]
     printGuard Nothing  = mempty
   printCase _ = l "error"
 
@@ -276,8 +285,8 @@ pretty n AmbientContext { precedence = p, blockContext = bc, infixContext = ic }
       [] -> []
       _ -> error "??"
     ps = join $ [r a f | (a, f) <- reverse xs ]
-    r a f = [pretty n (ac 3 Normal) a,
-             pretty n (AmbientContext 10 Normal Infix) f]
+    r a f = [pretty0 (ac 3 Normal) a,
+             pretty0 (AmbientContext 10 Normal Infix) f]
 
 pretty' :: Var v => Maybe Int -> PrettyPrintEnv -> AnnotatedTerm v a -> String
 pretty' (Just width) n t = PP.render width $ pretty n (ac (-1) Normal) t
@@ -285,15 +294,14 @@ pretty' Nothing      n t = PP.renderUnbroken $ pretty n (ac (-1) Normal) t
 
 prettyPattern
   :: Var v
-  => PrettyPrintEnv
-  -> Int
+  => Int
   -> [v]
   -> Pattern loc
-  -> (Pretty String, [v])
+  -> (PP.Pretty0 Referent String, [v])
 -- vs is the list of pattern variables used by the pattern, plus possibly a
 -- tail of variables it doesn't use.  This tail is the second component of
 -- the return value.
-prettyPattern n p vs patt = case patt of
+prettyPattern vs patt = case patt of
   Pattern.Unbound _   -> (l "_", vs)
   Pattern.Var     _   -> let (v : tail_vs) = vs in (l $ Var.nameStr v, tail_vs)
   Pattern.Boolean _ b -> (if b then l "true" else l "false", vs)
@@ -301,7 +309,7 @@ prettyPattern n p vs patt = case patt of
   Pattern.Nat     _ u -> (l $ show u, vs)
   Pattern.Float   _ f -> (l $ show f, vs)
   Pattern.Tuple [pp] ->
-    let (printed, tail_vs) = prettyPattern n 10 vs pp
+    let (printed, tail_vs) = prettyPattern 10 vs pp
     in  ( paren (p >= 10) $ PP.sep " " ["Pair", printed, "()"]
         , tail_vs )
   Pattern.Tuple pats ->
@@ -317,14 +325,14 @@ prettyPattern n p vs patt = case patt of
         , tail_vs)
   Pattern.As _ pat ->
     let (v : tail_vs)            = vs
-        (printed, eventual_tail) = prettyPattern n 11 tail_vs pat
+        (printed, eventual_tail) = prettyPattern 11 tail_vs pat
     in  (paren (p >= 11) $ ((l $ Var.nameStr v) <> l "@" <> printed), eventual_tail)
   Pattern.EffectPure _ pat ->
-    let (printed, eventual_tail) = prettyPattern n (-1) vs pat
+    let (printed, eventual_tail) = prettyPattern (-1) vs pat
     in  (PP.sep " " ["{", printed, "}"], eventual_tail)
   Pattern.EffectBind _ ref i pats k_pat ->
     let (pats_printed , tail_vs      ) = patternsSep PP.softbreak vs pats
-        (k_pat_printed, eventual_tail) = prettyPattern n 0 tail_vs k_pat
+        (k_pat_printed, eventual_tail) = prettyPattern 0 tail_vs k_pat
     in  ("{" <> l (Text.unpack (PrettyPrintEnv.patternName n ref i))
              <> (intercalateMap " " id [pats_printed, "->", k_pat_printed]) <>
          "}"
@@ -333,7 +341,7 @@ prettyPattern n p vs patt = case patt of
  where
   l = PP.lit
   patterns vs (pat : pats) =
-    let (printed     , tail_vs      ) = prettyPattern n (-1) vs pat
+    let (printed     , tail_vs      ) = prettyPattern (-1) vs pat
         (rest_printed, eventual_tail) = patterns tail_vs pats
     in  (printed : rest_printed, eventual_tail)
   patterns vs [] = ([], vs)
@@ -359,11 +367,11 @@ prettyBinding
 prettyBinding n v term = go (symbolic && isBinary term) term where
   go infix' = \case
     Ann' tm tp -> PP.lines [
-      PP.group (renderName v <> PP.hang " :" (TypePrinter.pretty n (-1) tp)),
+      PP.group (renderName v <> PP.hang " :" (TypePrinter.pretty0 (-1) tp)),
       PP.group (prettyBinding n v tm) ]
     LamsNamedOpt' vs body -> PP.group $
       PP.group (defnLhs v vs <> " =") `PP.hang`
-      pretty n (ac (-1) Block) body
+      pretty0 (ac (-1) Block) body
      where
     t -> l "error: " <> l (show t)
    where
@@ -393,7 +401,7 @@ paren True  s = PP.group $ "(" <> s <> ")"
 paren False s = PP.group s
 
 parenIfInfix
-  :: String -> InfixContext -> Pretty String -> Pretty String
+  :: String -> InfixContext -> Pretty0 e String -> Pretty0 e String
 parenIfInfix name ic =
   if isSymbolic (Text.pack name) && ic == NonInfix then paren True else id
 
