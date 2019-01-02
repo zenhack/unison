@@ -25,6 +25,9 @@ import qualified Data.ListLike                 as LL
 data Referent
   = Term Referent.Referent | Type Reference | Pattern Reference Int
 
+-- todo: pretty0 should produce a Pretty0 (Referent, Bool) or something
+-- that says whether to put the resulting name in parentheses
+
 toPretty :: (LL.ListLike s Char, IsString s)
          => PrettyPrintEnv -> PP.Pretty0 Referent s -> Pretty s
 toPretty ppe p = PP.fromPretty0 (text . env) p where
