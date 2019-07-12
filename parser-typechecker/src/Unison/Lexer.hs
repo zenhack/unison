@@ -409,7 +409,7 @@ lexer0 scope rem =
             Left e -> Token (Err e) pos pos : recover l pos rem
             Right (h, rem) ->
               let end = incBy id . incBy (SH.toString h) $ pos
-               in Token (SymbolyId id (Just h)) pos end
+               in Token (WordyId id (Just h)) pos end
                   : goWhitespace l end rem
         else let end = incBy id pos
               in Token (WordyId id Nothing) pos end : goWhitespace l end rem
