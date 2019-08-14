@@ -96,8 +96,8 @@ instance ShowToken (Token Lexeme) where
       pretty (Textual t) = '"' : t ++ ['"']
       pretty (Character c) =
         case showEscapeChar c of
-          Just c -> "?\\" ++ [c]
-          Nothing -> '?' : [c]
+          Just c -> "'\\" ++ [c] ++ "'"
+          Nothing -> "'" ++ [c] ++ "'"
       pretty (Backticks n h) =
         '`' : n ++ (toList h >>= SH.toString) ++ ['`']
       pretty (WordyId n h) = n ++ (toList h >>= SH.toString)
@@ -336,15 +336,15 @@ lexer0 scope rem =
     go :: Layout -> Pos -> String -> [Token Lexeme]
     go l pos rem = case rem of
       [] -> popLayout0 l pos []
-      '?' : '\\' : c : rem ->
+      '\'' : '\\' : c : '\'' : rem ->
         case parseEscapeChar c of
           Just c ->
-            let end = inc $ inc $ inc pos in
+            let end = inc $ inc $ inc $ inc pos in
             Token (Character c) pos end : goWhitespace l end rem
           Nothing ->
             [Token (Err $ InvalidEscapeCharacter c) pos pos]
-      '?' : c : rem ->
-        let end = inc $ inc pos in
+      '\'' : c : '\'' : rem ->
+        let end = inc $ inc $ inc pos in
         Token (Character c) pos end : goWhitespace l end rem
       -- '{' and '(' both introduce a block, which is closed by '}' and ')'
       -- The lexer doesn't distinguish among closing blocks: all the ways of
@@ -512,7 +512,6 @@ escapeChars =
   , ('r', '\r')
   , ('t', '\t')
   , ('v', '\v')
-  , ('s', ' ')
   , ('\'', '\'')
   , ('"', '"')
   , ('\\', '\\')

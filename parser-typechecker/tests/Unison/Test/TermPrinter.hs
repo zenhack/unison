@@ -288,7 +288,7 @@ test = scope "termprinter" . tests $
   , tc "!(!foo)"
   , tc "'bar"
   , tc "'(bar a b)"
-  , tc "'('bar)"
+  , tc "'( 'bar)"
   , tc "!('bar)"
   , tc "'(!foo)"
   , tc "x -> '(y -> 'z)"
